@@ -51,12 +51,14 @@ private:
     struct svm_problem prob;		// set by read_problem
     struct svm_model *model;
     struct svm_node *x_space;
+    QList<svm_node*> node_list;
+
     int cross_validation;
     int nr_fold;
 
-    char *line = NULL;
+    char *line = nullptr;
     int max_line_len;
-    void print_null(const char *s) {}
+
 
 };
 #endif // MAINWINDOW_H

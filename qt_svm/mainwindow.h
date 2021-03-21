@@ -40,23 +40,18 @@ private:
     }
 
     void initSVM();
-    void read_problem(const char *filename);
+    bool read_problem(const char *filename);
 
-    void predict_file(QString);
+    bool predict_file(QString);
 
     void do_cross_validation();
-    char * readline(FILE *input);
 
     struct svm_parameter param;		// set by parse_command_line
     struct svm_problem prob;		// set by read_problem
     struct svm_model *model;
-    struct svm_node *x_space;
-    int cross_validation;
-    int nr_fold;
+    QList<svm_node*> node_list;
 
-    char *line = NULL;
-    int max_line_len;
-    void print_null(const char *s) {}
+
 
 };
 #endif // MAINWINDOW_H

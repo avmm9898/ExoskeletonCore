@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>558</width>
-    <height>447</height>
+    <width>598</width>
+    <height>395</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -16,49 +16,83 @@
   <widget class="QWidget" name="centralWidget">
    <layout class="QHBoxLayout" name="horizontalLayout">
     <item>
-     <widget class="QLabel" name="Labelbtn">
-      <property name="text">
-       <string>BTN</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QLabel" name="labelpos">
-      <property name="text">
-       <string>Pos</string>
-      </property>
-     </widget>
-    </item>
-    <item>
-     <widget class="QSpinBox" name="spinBox"/>
-    </item>
-    <item>
-     <widget class="QPushButton" name="pushButton">
-      <property name="text">
-       <string>set</string>
-      </property>
-     </widget>
-    </item>
-    <item>
      <layout class="QVBoxLayout" name="verticalLayout">
       <item>
-       <widget class="QLabel" name="label_max">
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="QLabel" name="label_limitbtn">
+          <property name="text">
+           <string>Limitation button status</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <item>
+         <widget class="QLabel" name="label_enc_pos">
+          <property name="text">
+           <string>Current Pos= 0</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="spinBox">
+          <property name="minimumSize">
+           <size>
+            <width>80</width>
+            <height>0</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_manual_setpos">
+          <property name="text">
+           <string>Set</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_pos_limitation">
+        <property name="minimumSize">
+         <size>
+          <width>300</width>
+          <height>0</height>
+         </size>
+        </property>
         <property name="text">
-         <string>TextLabel</string>
+         <string>Clibrating max min area...</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="btn_up">
         <property name="text">
-         <string>UP</string>
+         <string>Up 1 degree</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="btn_down">
         <property name="text">
-         <string>DOWN</string>
+         <string>Down1 degree</string>
         </property>
        </widget>
       </item>
@@ -74,7 +108,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QLineEdit" name="line_model_name"/>
+       <widget class="QLineEdit" name="line_person_name"/>
       </item>
       <item>
        <widget class="QPushButton" name="btn_train">
@@ -84,17 +118,14 @@
        </widget>
       </item>
       <item>
-       <spacer name="verticalSpacer">
-        <property name="orientation">
-         <enum>Qt::Vertical</enum>
+       <widget class="QPushButton" name="btn_AIassistant">
+        <property name="text">
+         <string>AI is sleeping</string>
         </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>20</width>
-          <height>40</height>
-         </size>
-        </property>
-       </spacer>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTextBrowser" name="textBrowser"/>
       </item>
      </layout>
     </item>
@@ -105,8 +136,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>558</width>
-     <height>34</height>
+     <width>598</width>
+     <height>26</height>
     </rect>
    </property>
   </widget>

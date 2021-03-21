@@ -5,42 +5,87 @@ IMUsvm::IMUsvm()
 
 }
 
-int IMUsvm::trainSVM(QString filename)
+int IMUsvm::svmPredict(QString line, QString t_person_name)
 {
-    char input_file_name[50]=filename.toLocal8Bit().data();
-    char model_file_name[50]="svm.model";
-    QString testfile="5_test_1s.csv";
+    if(fileExists(t_person_name+".model")){
+        if(this->person_name!=t_person_name){
+            this->person_name=t_person_name;
+            char *c_savefilename=(t_person_name+".model").toLocal8Bit().data();
+            model=svm_load_model(c_savefilename);
+        }
 
-    const char *error_msg;
+        //int svm_type=svm_get_svm_type(model);
+        int nr_class=svm_get_nr_class(model);
+
+
+        //ex:"accx,accy,accz,gyrx,gyry,roll,pitch"
+        QStringList a_row_data=line.split(',');
+
+        //-1 is because there is no label at first
+        svm_node a_node[8];
+
+        for(int feature=0;feature<7;feature++){
+            a_node[feature].index=feature+1;
+            a_node[feature].value=a_row_data.at(feature).toDouble();
+        }
+
+        a_node[7].index = -1;
+
+        int *labels=(int *) malloc(nr_class*sizeof(int));
+        svm_get_labels(model,labels);
+
+        double label = svm_predict(model, a_node);
+        label=round(label);
+
+        return int(label);
+    }else{
+        return -1;
+    }
+}
+
+bool fileExists(QString path) {
+    QFileInfo check_file(path);
+    // check if file exists and if yes: Is it really a file and no directory?
+    if (check_file.exists() && check_file.isFile()) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+bool IMUsvm::trainSVM(QString t_person_name)
+{
 
     initSVM();
-    read_problem(input_file_name);
+    read_problem(t_person_name+".csv");
+
+
+    //train model
+    char *c_savefilename=(t_person_name+".model").toLocal8Bit().data();
+    const char *error_msg;
+
     error_msg = svm_check_parameter(&prob,&param);
 
     if(error_msg)
     {
-        fprintf(stderr,"ERROR: %s\n",error_msg);
-        exit(1);
+        qDebug()<<QString("parameter error: %s").arg(error_msg);
+        return 1;
     }
 
-
-    //model=svm_load_model(model_file_name);
     model = svm_train(&prob,&param);
-    if(svm_save_model(model_file_name,model))
+    if(svm_save_model(c_savefilename,model))
     {
-        fprintf(stderr, "can't save model to file %s\n", model_file_name);
-        exit(1);
+        qDebug()<<QString("can't save model to file %s\n").arg(c_savefilename);
+        return 1;
     }
-    predict_file(testfile);
-
 
     svm_free_and_destroy_model(&model);
-
     svm_destroy_param(&param);
     free(prob.y);
     free(prob.x);
-    free(x_space);
-    free(line);
+    qDebug()<<QString("%s is saved").arg(c_savefilename);
+
+    return 0;
 }
 
 void IMUsvm::initSVM()
@@ -61,95 +106,75 @@ void IMUsvm::initSVM()
     param.nr_weight = 0;
     param.weight_label = NULL;
     param.weight = NULL;
-    cross_validation = 0;
+
+    person_name="";
 }
 
-void IMUsvm::read_problem(const char *filename)
+bool IMUsvm::read_problem(QString filename)
 {
 
+    QStringList line_list;
     QFile file(filename);
     if (!file.open(QIODevice::ReadOnly)) {
         qDebug() << file.errorString();
+        return 1;
     }
-    QString line=file.readLine();
-    QStringList a_row_data=line.split(',');
+
+    //read all line
     while (!file.atEnd()){
-
-
+        line_list.append(file.readLine());
     }
 
-    int max_index, inst_max_index, i;
-    size_t elements, j;
-    FILE *fp = fopen(filename,"r");
-    double label;
-
-    if(fp == NULL)
-    {
-        fprintf(stderr,"can't open input file %s\n",filename);
-        exit(1);
+    //check if any line exists
+    if(line_list.length()<=0){
+        qDebug() << "no line in file";
+        return 1;
     }
 
-    prob.l = 0;
-    elements = 0;
+    //empty row
+    if(line_list.last().indexOf(',')==-1)
+        line_list.pop_back();
 
-    max_line_len = 1024;
-    line = Malloc(char,max_line_len);
-    while(readline(fp)!=NULL)
-    {
-
-        char *p = strtok(line,","); // label
-
-        // features
-        while(1)
-        {
-            p = strtok(NULL,",");
-
-            if(p == NULL || *p == '\n') // check '\n' as ' ' may be after the last feature
-                break;
-            ++elements;
-        }
-        ++elements;
-        ++prob.l;
-    }
-    rewind(fp);
-
+    prob.l=line_list.length();
     prob.y = Malloc(double,prob.l);
     prob.x = Malloc(struct svm_node *,prob.l);
 
-    node_list.clear();
 
-    max_index = 0;
-    j=0;
-    for(i=0;i<prob.l;i++)
+    for(int i=0;i<prob.l;i++)
     {
-        inst_max_index = -1; // strtol gives 0 if wrong format, and precomputed kernel has <index> start from 0
-        readline(fp);
+
+        QStringList a_row_data= line_list.at(i).split(QLatin1Char(','));
+
+        //check length
+        if(a_row_data.length()<=0){
+            qDebug() << "no feature in a line";
+            return 1;
+        }
+
 
         svm_node *a_node;
         a_node = Malloc(struct svm_node,8);
 
-        QStringList a_row_data= QString(line).split(QLatin1Char(','));
+        double label;
         label=a_row_data.first().toInt();
         prob.y[i] = label;
 
-        for(int feature=1;feature<a_row_data.length();feature++){
-            a_node[feature-1].index=feature;
-            a_node[feature-1].value=a_row_data.at(feature).toDouble();
+        for(int feature=0;feature<7;feature++){
+            a_node[feature].index=feature+1;
+            a_node[feature].value=a_row_data.at(feature+1).toDouble();
 
-            //ui->textBrowser->append(tr("train-index:%1,value:%2,j=%3").arg(x_space[j].index).arg(x_space[j].value).arg(j));
         }
 
-
-
         a_node[7].index = -1;
-        node_list.append(a_node);
-        prob.x[i] = node_list[i];
-    }
 
-    fclose(fp);
+        train_node_list.append(a_node);
+        prob.x[i] = train_node_list[i];
+    }
+    file.close();
+    return 0;
 }
 
-void IMUsvm::predict_file(QString filename)
+bool IMUsvm::predict_file(QString filename)
 {
 
     int svm_type=svm_get_svm_type(model);
@@ -185,7 +210,6 @@ void IMUsvm::predict_file(QString filename)
         svm_get_labels(model,labels);
 
 
-
         double label = svm_predict(model, a_node);
         label=round(label);
 
@@ -195,24 +219,7 @@ void IMUsvm::predict_file(QString filename)
         row_counter++;
 
     }
-    //round(wrong/row_counter*100);
-
+    qDebug()<<QString("Error=%1%").arg(round(wrong/row_counter*100));
+    return 0;
 }
 
-char *IMUsvm::readline(FILE *input)
-{
-    int len;
-
-    if(fgets(line,max_line_len,input) == NULL)
-        return NULL;
-
-    while(strrchr(line,'\n') == NULL)
-    {
-        max_line_len *= 2;
-        line = (char *) realloc(line,max_line_len);
-        len = (int) strlen(line);
-        if(fgets(line+len,max_line_len-len,input) == NULL)
-            break;
-    }
-    return line;
-}

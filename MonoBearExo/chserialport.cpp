@@ -99,7 +99,6 @@ void CHSerialPort::on_thread_started()
 
 void CHSerialPort::on_thread_stopped()
 {
-
     receive_gwsol.tag=0;
     receive_gwsol.n=0;
 }

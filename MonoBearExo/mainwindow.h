@@ -42,12 +42,10 @@ private slots:
 
     void on_btn_train_clicked();
 
-    void on_btn_AIassisstant_clicked();
-
-    void on_motor_lift();
-
-signals:
-    void sig_motor_lift();
+    void on_btn_AIassistant_clicked();
+    //controlMachine activated by AIassistant_timer
+    void collectTrainingData();
+    void controlMachine();
 
 private:
     Ui::MainWindow *ui;
@@ -75,7 +73,7 @@ private:
     //collect training data
     QTimer *svm_trainer_timer;
 
-    void collectTrainingData();
+
     bool saveData2CSV(QStringList data, QString person_profile);
     double stddev(std::vector<double> const & func);
 
@@ -88,8 +86,7 @@ private:
     QTimer *AIassistant_timer;
     int collectPredictionData();
 
-    //controlMachine activated by AIassistant_timer
-    void controlMachine();
+
     int control_state=0;
 
 

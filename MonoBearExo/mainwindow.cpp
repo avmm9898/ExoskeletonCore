@@ -375,7 +375,7 @@ void MainWindow::controlMachine()
 }
 
 
-double stddev(std::vector<double> const & func)
+double MainWindow::stddev(std::vector<double> const & func)
 {
     double mean = std::accumulate(func.begin(), func.end(), 0.0) / func.size();
     double sq_sum = std::inner_product(func.begin(), func.end(), func.begin(), 0.0,
@@ -474,7 +474,7 @@ void MainWindow::on_btn_train_clicked()
     svm_trainer_timer->start();
 }
 
-void MainWindow::on_btn_AIassisstant_clicked()
+void MainWindow::on_btn_AIassistant_clicked()
 {
     if(!AIassistant_timer->isActive()){
         AIassistant_timer->start();

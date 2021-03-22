@@ -43,7 +43,7 @@ int IMUsvm::svmPredict(QString line, QString t_person_name)
     }
 }
 
-bool fileExists(QString path) {
+bool IMUsvm::fileExists(QString path) {
     QFileInfo check_file(path);
     // check if file exists and if yes: Is it really a file and no directory?
     if (check_file.exists() && check_file.isFile()) {

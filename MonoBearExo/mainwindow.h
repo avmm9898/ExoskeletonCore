@@ -62,6 +62,8 @@ private:
     float imu_roll=0;
     float imu_gyrX=0;
 
+    int rotateToBodyDegree(int degree);
+
     //imu port
     CHSerialPort *ch_serialport;
     receive_imusol_packet_t raw_imu_data;
@@ -85,6 +87,8 @@ private:
     //collect prediction data
     QTimer *AIassistant_timer;
     int collectPredictionData();
+
+
 
 
     int control_state=0;

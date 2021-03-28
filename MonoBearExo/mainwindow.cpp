@@ -31,14 +31,15 @@ MainWindow::MainWindow(QWidget *parent) :
     //motor
     QString str_error;
 
-    pos=new int();
+    enc_pos=new int();
     m_motor=new MaxonMotor();
     bool motor_connected = m_motor->openDevice(&str_error);
+
     bool motor_set = m_motor->setmotor_Operationmode(&str_error);
     bool enable_state = m_motor->setEnabled(&str_error);
 
     ui->spinBox->setRange(-one_motor_rotate*1000,one_motor_rotate*1000);
-    motorCalibrate();
+
 
     encoder_timer = new QTimer(this);
     connect(encoder_timer,  SIGNAL(timeout()) ,this, SLOT(getpos()));
@@ -274,6 +275,7 @@ void MainWindow::controlMachine()
 
     //define bending area of angles
     bool bending_area=(imu_roll<75 &&imu_roll>-90);
+    ui->label_imuroll->setText(tr("Roll=%1").arg(imu_roll));
 
     static int counter_for_lockmode;
 
@@ -293,10 +295,14 @@ void MainWindow::controlMachine()
         if(rst==-1){
             ui->textBrowser->append(ui->line_person_name->text()+".model is not exists");
         }else if(rst==0){//change to lifting motion
+            ui->textBrowser->append(tr("go to lifting"));
             control_state=1;
         }else if(rst==1){//user picking fast, doesn't need motor assistant, so it change to lock detection mode.
+
+            ui->textBrowser->append(tr("go to lock detection"));
             control_state=2;
         }else{
+
             control_state=0;}
 
         break;}
@@ -305,10 +311,27 @@ void MainWindow::controlMachine()
 
         if(bending_area){
             //send signal once. It'll shorten the wire, help lifting
-            rotateToBodyDegree(75);
+
+            static short insideloop=0;
+
+            //wait 1 sec to start assistant
+
+
+            if(insideloop>100){
+
+                //only rotate while body up
+                if(imu_gyrX>10)
+                rotateToBodyDegree(imu_roll);
+                else{
+                    insideloop=0;
+                    this->control_state=2;
+                }
+
+            } else {insideloop++;
+            }
 
             //change to lock detection mode.
-            this->control_state=2;
+
         }else{
 
             //release all wire to free mode
@@ -323,12 +346,12 @@ void MainWindow::controlMachine()
 
         if(bending_area){
             //while user keep body at a posture for more than 2000ms, will change state into lock mode.
-            if(imu_gyrX<10){
+            if(abs(imu_gyrX)<10){
                 counter_for_lockmode++;
             }else{
                 counter_for_lockmode=0;}
 
-            if(counter_for_lockmode>200){
+            if(counter_for_lockmode>500){
                 this->control_state=3;}
 
         }else{//not in bending area
@@ -347,6 +370,7 @@ void MainWindow::controlMachine()
             if(!islocked){
                 rotateToBodyDegree(imu_roll);
                 islocked=true;
+                ui->textBrowser->append(tr("lock? %1").arg(islocked));
             }
 
         }else{
@@ -355,7 +379,8 @@ void MainWindow::controlMachine()
             islocked=false;
             rotateToBodyDegree(-100);
             this->control_state=0;
-            counter_for_lockmode=0;}
+            counter_for_lockmode=0;
+            ui->textBrowser->append(tr("lock? %1").arg(islocked));}
 
         break;}
 
@@ -378,16 +403,18 @@ int MainWindow::rotateToBodyDegree(int degree)
 
     if(imu_pos>max_pos_limit){
 
-        imu_pos=max_pos_limit;
+        imu_pos=max_pos_limit-one_motor_rotate;
 
     }else if(imu_pos<min_pos_limit){
-        imu_pos=min_pos_limit;
+        imu_pos=min_pos_limit+one_motor_rotate;
     }
 
-    *pos=imu_pos;
-    ui->spinBox->setValue(*pos);
+    //*pos=imu_pos;
+    ui->spinBox->setValue(imu_pos);
 
-    m_motor->moveToPosition(*pos);
+    m_motor->moveToPosition(imu_pos);
+
+    ui->textBrowser->append(tr("move to %1").arg(degree));
     return 0;
 }
 
@@ -411,24 +438,31 @@ void MainWindow::getpos()
     btn_state=digitalRead(buttonPin);
 
     //qDebug()<<btn_state;
-    ui->Labelbtn->setNum(btn_state);
+    ui->label_limitbtn->setNum(btn_state);
 
-    err_handle=m_motor->getPosition(pos);
 
-    ui->label_enc_pos->setText(tr("Current Pos= %1").arg(*pos));
+    err_handle=m_motor->getPosition(enc_pos);
 
-    if(err_handle || btn_state!=1){
+    ui->label_enc_pos->setText(tr("Current Pos= %1").arg(*enc_pos));
 
-        //while limitation btn is pressed
+    if(err_handle){
+
 
         //ui->label_limitbtn->setText("Motor Reach Up Limitation!");
-        if(max_pos_limit<*pos){
-            if(m_motor->haltMotor()){
-                qDebug()<<"halt success";
-            }
+        if(max_pos_limit<*enc_pos){
+            //            if(m_motor->haltMotor()){
+            //                qDebug()<<"halt success";
+            //            }
+            //ui->textBrowser->append("too big");
 
-            m_motor->moveToPosition(max_pos_limit);
+            //m_motor->moveToPosition(max_pos_limit-one_motor_rotate);
         }
+        if(min_pos_limit>*enc_pos){
+            //ui->textBrowser->append("too small");
+
+            //m_motor->moveToPosition(min_pos_limit+one_motor_rotate);
+        }
+
     }
 
 
@@ -440,7 +474,7 @@ void MainWindow::motorCalibrate()
 
     while(true){
         bool err_handle; //1 if success, 0 if error
-        err_handle=m_motor->getPosition(pos);
+        err_handle=m_motor->getPosition(enc_pos);
 
         int btn_state=2;
         btn_state=digitalRead(buttonPin);
@@ -454,21 +488,21 @@ void MainWindow::motorCalibrate()
 
                 //max_pos_limit:the wire is shortest, min_pos_limit:the wire is released
                 //while reach max, reset the max_pos_limit, and move it to see if it's still touch limitation btn
-                max_pos_limit=*pos-one_body_degree*15;
+                min_pos_limit=*enc_pos+one_body_degree*15;
 
                 //the free position is: a degree=16384*160(reduction ratio)/360, we set to 200 bending degrees of body.
-                min_pos_limit=max_pos_limit-one_motor_rotate*160.0f/360.0f*200.0f;
+                max_pos_limit=min_pos_limit+one_motor_rotate*160.0f/360.0f*160.0f;
                 ui->label_pos_limitation->setText(tr("MaxPos=%1,MinPos=%2").arg(max_pos_limit).arg(min_pos_limit));
 
-                m_motor->moveToPosition(max_pos_limit);
+                m_motor->moveToPosition(min_pos_limit+one_motor_rotate);
                 break;
 
             }else{
                 //ui->label_limitbtn->setText("Motor is In Save Area");
-                *pos+=one_motor_rotate;
-                ui->spinBox->setValue(*pos);
+                *enc_pos-=one_motor_rotate;
+                ui->spinBox->setValue(*enc_pos);
 
-                m_motor->moveToPosition(*pos);}}}
+                m_motor->moveToPosition(*enc_pos);}}}
 
 }
 
@@ -502,13 +536,17 @@ void MainWindow::on_btn_manual_setpos_clicked()
 void MainWindow::on_btn_up_clicked()
 {
     ui->spinBox->setValue(ui->spinBox->value()+one_motor_rotate);
-    long pos = ui->spinBox->value();
-    //m_motor->moveToPosition(pos);
+
 }
 
 void MainWindow::on_btn_down_clicked()
 {
     ui->spinBox->setValue(ui->spinBox->value()-one_motor_rotate);
 
-    //m_motor->moveToPosition(pos);
+}
+
+void MainWindow::on_btn_calimotor_clicked()
+{
+    motorCalibrate();
+    //rotateToBodyDegree(-100);
 }

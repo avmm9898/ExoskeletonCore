@@ -43,7 +43,7 @@ bool MaxonMotor::setmotor_Operationmode(QString *str_ErrorCode)
         return false;
     }
     VCS_ActivateProfilePositionMode(keyHandle,node_ID,&errorCode);
-    if(!VCS_SetPositionProfile(keyHandle,node_ID,3600,500,500,&errorCode)){  //Velocity, Acceleration, Deceleration
+    if(!VCS_SetPositionProfile(keyHandle,node_ID,3200,500,500,&errorCode)){  //Velocity, Acceleration, Deceleration
         qDebug()<<"set success";
     }
     return true;
@@ -55,7 +55,7 @@ bool MaxonMotor::moveToPosition(long position_rpm)
     unsigned int errorCode = 0;
     long targetPosition = position_rpm;
     if(!VCS_MoveToPosition(keyHandle,node_ID,targetPosition,1,1,&errorCode)){
-        qDebug()<<"something wrong";
+        qDebug()<<"move wrong";
         return false;
     }
     //qDebug()<<"move to"<<targetPosition;

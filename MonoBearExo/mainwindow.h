@@ -47,6 +47,8 @@ private slots:
     void collectTrainingData();
     void controlMachine();
 
+    void on_btn_calimotor_clicked();
+
 private:
     Ui::MainWindow *ui;
 
@@ -54,7 +56,8 @@ private:
     MaxonMotor *m_motor;
     void* keyHandle;
     QTimer *encoder_timer;
-    int *pos;
+    //int *pos;
+    int *enc_pos;
 
     //max and min pos limitation
     int max_pos_limit=40000;

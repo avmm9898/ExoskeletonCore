@@ -1,0 +1,552 @@
+#include "mainwindow.h"
+#include "ui_mainwindow.h"
+
+const int buttonPin=4;
+const int one_motor_rotate=16384;
+const int one_body_degree=7281;
+
+MainWindow::MainWindow(QWidget *parent) :
+    QMainWindow(parent),
+    ui(new Ui::MainWindow)
+{
+    ui->setupUi(this);
+
+    wiringPiSetup();
+    pinMode(buttonPin,INPUT);
+    pullUpDnControl(buttonPin,PUD_UP);
+
+    ch_serialport = new CHSerialPort(nullptr);
+
+    //get data from ch_serialport class
+    //    connect(ch_serialport, SIGNAL(errorOpenPort()), this, SLOT(geterrorOpenPort()));
+    //    connect(ch_serialport, SIGNAL(sigPortOpened()), this, SLOT(getsigPortOpened()));
+    //    connect(ch_serialport, SIGNAL(sigPortClosed()), this, SLOT(getsigPortClosed()));
+
+    connect(ch_serialport, SIGNAL(sigSendIMU(receive_imusol_packet_t)),
+            this, SLOT(getIMUData(receive_imusol_packet_t)), Qt::QueuedConnection);
+    //link imu
+    ch_serialport->linkCHdevices("/dev/ttyUSB0",115200);
+
+
+    //motor
+    QString str_error;
+
+    enc_pos=new int();
+    m_motor=new MaxonMotor();
+    bool motor_connected = m_motor->openDevice(&str_error);
+
+    bool motor_set = m_motor->setmotor_Operationmode(&str_error);
+    bool enable_state = m_motor->setEnabled(&str_error);
+
+    ui->spinBox->setRange(-one_motor_rotate*1000,one_motor_rotate*1000);
+
+
+    encoder_timer = new QTimer(this);
+    connect(encoder_timer,  SIGNAL(timeout()) ,this, SLOT(getpos()));
+
+    encoder_timer->setInterval(10);
+    encoder_timer->start();
+
+    //svm
+    m_IMUsvm=new IMUsvm();
+    svm_trainer_timer = new QTimer(this);
+    connect(svm_trainer_timer,  SIGNAL(timeout()) ,this, SLOT(collectTrainingData()));
+    svm_trainer_timer->setInterval(10);
+
+    //start au assist
+    AIassistant_timer = new QTimer(this);
+    connect(AIassistant_timer,  SIGNAL(timeout()) ,this, SLOT(controlMachine()));
+    AIassistant_timer->setInterval(10);
+
+}
+
+MainWindow::~MainWindow()
+{
+    //close imu port and thread
+    ch_serialport->closePort();
+
+    QString str_error;
+    bool disable_state = m_motor->setDisabled(&str_error);
+    m_motor->closeAllDevice();
+
+
+    delete ui;
+}
+
+void MainWindow::getIMUData(receive_imusol_packet_t imu_data)
+{
+    static QList<float> imu_roll_3mean;
+    static QList<float> imu_gyrX_3mean;
+
+    imu_roll_3mean.append(imu_data.eul[0]);
+    imu_gyrX_3mean.append(imu_data.acc[0]);
+    if(imu_roll_3mean.length()>3){
+        imu_roll_3mean.pop_front();
+        imu_gyrX_3mean.pop_front();
+    }
+
+    imu_roll=(imu_roll_3mean.at(0)+imu_roll_3mean.at(1)+imu_roll_3mean.at(2))/3.0f;
+    imu_gyrX=(imu_gyrX_3mean.at(0)+imu_gyrX_3mean.at(1)+imu_gyrX_3mean.at(2))/3.0f;
+
+    raw_imu_data=imu_data;
+
+}
+
+void MainWindow::collectTrainingData()
+{
+    static QStringList motion_data;
+    static int windowsize_counter=0;
+    static std::vector<double> vec_accX,vec_accY,vec_accZ,
+            vec_gyrX,vec_gyrY,vec_roll,vec_pitch;
+
+    const uint training_amount=12;
+
+    uint num_motion=motion_data.length();
+
+    //define bending area of angles
+    bool bending_area=(imu_roll<75 &&imu_roll>0);
+
+    if(bending_area){
+
+        //true until motion.data.length() >= training amount
+
+        if(windowsize_counter>=0 && windowsize_counter<=100){
+
+            vec_accX.push_back(raw_imu_data.acc[0]);
+            vec_accY.push_back(raw_imu_data.acc[1]);
+            vec_accZ.push_back(raw_imu_data.acc[2]);
+            vec_gyrX.push_back(raw_imu_data.gyr[0]);
+            vec_gyrY.push_back(raw_imu_data.gyr[1]);
+            vec_roll.push_back(raw_imu_data.eul[0]);
+            vec_pitch.push_back(raw_imu_data.eul[1]);
+            windowsize_counter++;
+
+        }else if(windowsize_counter>100){
+
+            int label=0;
+            if(num_motion<training_amount/2)
+                label=1;//fast motion
+            else if(num_motion>=training_amount/2 && num_motion<training_amount)
+                label=0;//lifting motion
+
+            double std_accX=stddev(vec_accX);
+            double std_accY=stddev(vec_accY);
+            double std_accZ=stddev(vec_accZ);
+            double std_gyrX=stddev(vec_gyrX);
+            double std_gyrY=stddev(vec_gyrY);
+            double std_roll=stddev(vec_roll);
+            double std_pitch=stddev(vec_pitch);
+            QString a_row_data=QString("%1,%2,%3,%4,%5,%6,%7,%8\n").arg(label).arg(QString::number(std_accX, 'f', 3))
+                    .arg(QString::number(std_accY, 'f', 3)).arg(QString::number(std_accZ, 'f', 3))
+                    .arg(QString::number(std_gyrX, 'f', 3)).arg(QString::number(std_gyrY, 'f', 3))
+                    .arg(QString::number(std_roll, 'f', 3)).arg(QString::number(std_pitch, 'f', 3));
+
+            motion_data.append(a_row_data);
+            ui->textBrowser->append(tr("A row %1 has been recorded: %2").arg(num_motion).arg(a_row_data));
+
+            //stop pushing new data until leaving bending area;
+            windowsize_counter=-1;}
+
+    }else{//not in bending area
+
+        //restart collect a window of data
+        if(windowsize_counter!=0){
+            windowsize_counter=0;
+            vec_accX.clear();
+            vec_accY.clear();
+            vec_accZ.clear();
+            vec_gyrX.clear();
+            vec_gyrY.clear();
+            vec_roll.clear();
+            vec_pitch.clear();}}
+
+    if(num_motion>=training_amount){
+        bool err=saveData2CSV(motion_data, person_name);
+
+        if(err){
+            ui->textBrowser->append(person_name+".csv can't be opened");
+        }else{
+            bool err1=m_IMUsvm->trainSVM(person_name);
+
+            if(err1){
+                ui->textBrowser->append("train svm error!");
+            }else{
+                ui->textBrowser->append(person_name+".model"+" is trained");}
+        }
+
+        //stop training
+        windowsize_counter=0;
+        vec_accX.clear();
+        vec_accY.clear();
+        vec_accZ.clear();
+        vec_gyrX.clear();
+        vec_gyrY.clear();
+        vec_roll.clear();
+        vec_pitch.clear();
+        motion_data.clear();
+        svm_trainer_timer->stop();}
+
+}
+
+
+
+bool MainWindow::saveData2CSV(QStringList data, QString person_profile)
+{
+    QFile file(person_profile+".csv");
+
+    if (!file.open(QFile::WriteOnly | QFile::Truncate |QIODevice::Append)) {
+        qDebug() << file.errorString();
+        return 1;
+    }else{
+        QTextStream stream(&file);
+
+        for (int i=0; i<data.length(); i++) {
+            stream << data.at(i);
+        }}
+
+    file.close();
+    return 0;
+}
+
+int MainWindow::collectPredictionData()
+{
+    static int windowsize_counter=0;
+    static std::vector<double> vec_accX,vec_accY,vec_accZ,
+            vec_gyrX,vec_gyrY,vec_roll,vec_pitch;
+
+    //define bending area of angles
+    bool bending_area=(imu_roll<75 &&imu_roll>-90);
+
+    if(bending_area){
+        if(windowsize_counter>=0 && windowsize_counter<=100){
+
+            vec_accX.push_back(raw_imu_data.acc[0]);
+            vec_accY.push_back(raw_imu_data.acc[1]);
+            vec_accZ.push_back(raw_imu_data.acc[2]);
+            vec_gyrX.push_back(raw_imu_data.gyr[0]);
+            vec_gyrY.push_back(raw_imu_data.gyr[1]);
+            vec_roll.push_back(raw_imu_data.eul[0]);
+            vec_pitch.push_back(raw_imu_data.eul[1]);
+            windowsize_counter++;
+
+        }else if(windowsize_counter>100){
+
+            double std_accX=stddev(vec_accX);
+            double std_accY=stddev(vec_accY);
+            double std_accZ=stddev(vec_accZ);
+            double std_gyrX=stddev(vec_gyrX);
+            double std_gyrY=stddev(vec_gyrY);
+            double std_roll=stddev(vec_roll);
+            double std_pitch=stddev(vec_pitch);
+            QString a_row_data=QString("%1,%2,%3,%4,%5,%6,%7").arg(QString::number(std_accX, 'f', 3))
+                    .arg(QString::number(std_accY, 'f', 3)).arg(QString::number(std_accZ, 'f', 3))
+                    .arg(QString::number(std_gyrX, 'f', 3)).arg(QString::number(std_gyrY, 'f', 3))
+                    .arg(QString::number(std_roll, 'f', 3)).arg(QString::number(std_pitch, 'f', 3));
+
+            int rst=m_IMUsvm->svmPredict(a_row_data, ui->line_person_name->text());
+            windowsize_counter=-1;
+            return rst;}
+
+
+    }else{//not in bending area
+
+        //restart collect a window of data
+        if(windowsize_counter!=0){
+            windowsize_counter=0;
+            vec_accX.clear();
+            vec_accY.clear();
+            vec_accZ.clear();
+            vec_gyrX.clear();
+            vec_gyrY.clear();
+            vec_roll.clear();
+            vec_pitch.clear();}}
+
+    return -2;//normally ignoring
+}
+
+void MainWindow::controlMachine()
+{
+    /*
+     * timer run this loop every 10ms
+     * (while bend to lowest)-90< imu_roll <90(while standing)
+     * imu_gyrX>0 while lifting, imu_gyrX<0 while bending
+    */
+
+
+    //define bending area of angles
+    bool bending_area=(imu_roll<75 &&imu_roll>-90);
+    ui->label_imuroll->setText(tr("Roll=%1").arg(imu_roll));
+
+    static int counter_for_lockmode;
+
+
+    switch (this->control_state) {
+
+    case 0:{
+
+        /*rst=-2 while not in bending area or haven't receive a window of datas(1000ms)
+         *When user enter into bending area "<75 degrees", it'll collect a window of datas(1000ms) to predict motion.
+         *rst=-1 if couldn't find model
+         *When a window of datas(1000ms) is collected, rst will ==0 or 1, which is the prediction result.
+         *
+        */
+        int rst=collectPredictionData();
+
+        if(rst==-1){
+            ui->textBrowser->append(ui->line_person_name->text()+".model is not exists");
+        }else if(rst==0){//change to lifting motion
+            ui->textBrowser->append(tr("go to lifting"));
+            control_state=1;
+        }else if(rst==1){//user picking fast, doesn't need motor assistant, so it change to lock detection mode.
+
+            ui->textBrowser->append(tr("go to lock detection"));
+            control_state=2;
+        }else{
+
+            control_state=0;}
+
+        break;}
+
+    case 1:{//enter into motor lifting state
+
+        if(bending_area){
+            //send signal once. It'll shorten the wire, help lifting
+
+            static short insideloop=0;
+
+            //wait 1 sec to start assistant
+
+
+            if(insideloop>100){
+
+                //only rotate while body up
+                if(imu_gyrX>10)
+                rotateToBodyDegree(imu_roll);
+                else{
+                    insideloop=0;
+                    this->control_state=2;
+                }
+
+            } else {insideloop++;
+            }
+
+            //change to lock detection mode.
+
+        }else{
+
+            //release all wire to free mode
+            rotateToBodyDegree(-100);
+            this->control_state=0;
+            counter_for_lockmode=0;}
+
+        break;}
+
+
+    case 2:{//lock detection mode. check if body is static.
+
+        if(bending_area){
+            //while user keep body at a posture for more than 2000ms, will change state into lock mode.
+            if(abs(imu_gyrX)<10){
+                counter_for_lockmode++;
+            }else{
+                counter_for_lockmode=0;}
+
+            if(counter_for_lockmode>500){
+                this->control_state=3;}
+
+        }else{//not in bending area
+
+            //release all wire to free mode
+            rotateToBodyDegree(-100);
+            this->control_state=0;
+            counter_for_lockmode=0;}
+
+        break;}
+
+
+    case 3:{//enter into lock mode
+        static bool islocked=false;
+        if(bending_area){
+            if(!islocked){
+                rotateToBodyDegree(imu_roll);
+                islocked=true;
+                ui->textBrowser->append(tr("lock? %1").arg(islocked));
+            }
+
+        }else{
+
+            //release all wire to free mode
+            islocked=false;
+            rotateToBodyDegree(-100);
+            this->control_state=0;
+            counter_for_lockmode=0;
+            ui->textBrowser->append(tr("lock? %1").arg(islocked));}
+
+        break;}
+
+    default:{
+
+        //release all wire to free mode
+        rotateToBodyDegree(-100);
+        this->control_state=0;
+        counter_for_lockmode=0;
+        break;}}
+
+
+
+}
+
+int MainWindow::rotateToBodyDegree(int degree)
+{
+    //((standing angle)-imu_roll)/360 *(one_motor_rotate of encoder)/(reduction ratio=1/160)))
+    int imu_pos=round(max_pos_limit-(75-degree)*one_body_degree);
+
+    if(imu_pos>max_pos_limit){
+
+        imu_pos=max_pos_limit-one_motor_rotate;
+
+    }else if(imu_pos<min_pos_limit){
+        imu_pos=min_pos_limit+one_motor_rotate;
+    }
+
+    //*pos=imu_pos;
+    ui->spinBox->setValue(imu_pos);
+
+    m_motor->moveToPosition(imu_pos);
+
+    ui->textBrowser->append(tr("move to %1").arg(degree));
+    return 0;
+}
+
+
+double MainWindow::stddev(std::vector<double> const & func)
+{
+    double mean = std::accumulate(func.begin(), func.end(), 0.0) / func.size();
+    double sq_sum = std::inner_product(func.begin(), func.end(), func.begin(), 0.0,
+                                       [](double const & x, double const & y) { return x + y; },
+    [mean](double const & x, double const & y) { return (x - mean)*(y - mean); });
+    return sqrt(sq_sum / func.size());
+}
+
+
+
+void MainWindow::getpos()
+{
+
+    bool err_handle; //1 if success, 0 if error
+    int btn_state=2;
+    btn_state=digitalRead(buttonPin);
+
+    //qDebug()<<btn_state;
+    ui->label_limitbtn->setNum(btn_state);
+
+
+    err_handle=m_motor->getPosition(enc_pos);
+
+    ui->label_enc_pos->setText(tr("Current Pos= %1").arg(*enc_pos));
+
+    if(err_handle){
+
+
+        //ui->label_limitbtn->setText("Motor Reach Up Limitation!");
+        if(max_pos_limit<*enc_pos){
+            //            if(m_motor->haltMotor()){
+            //                qDebug()<<"halt success";
+            //            }
+            //ui->textBrowser->append("too big");
+
+            //m_motor->moveToPosition(max_pos_limit-one_motor_rotate);
+        }
+        if(min_pos_limit>*enc_pos){
+            //ui->textBrowser->append("too small");
+
+            //m_motor->moveToPosition(min_pos_limit+one_motor_rotate);
+        }
+
+    }
+
+
+}
+
+
+void MainWindow::motorCalibrate()
+{
+
+    while(true){
+        bool err_handle; //1 if success, 0 if error
+        err_handle=m_motor->getPosition(enc_pos);
+
+        int btn_state=2;
+        btn_state=digitalRead(buttonPin);
+
+        if(err_handle){
+            if(btn_state!=1){
+                //ui->label_limitbtn->setText("Motor Reach Up Limitation!");
+
+                if(m_motor->haltMotor()){
+                    qDebug()<<"halt success";}
+
+                //max_pos_limit:the wire is shortest, min_pos_limit:the wire is released
+                //while reach max, reset the max_pos_limit, and move it to see if it's still touch limitation btn
+                min_pos_limit=*enc_pos+one_body_degree*15;
+
+                //the free position is: a degree=16384*160(reduction ratio)/360, we set to 200 bending degrees of body.
+                max_pos_limit=min_pos_limit+one_motor_rotate*160.0f/360.0f*160.0f;
+                ui->label_pos_limitation->setText(tr("MaxPos=%1,MinPos=%2").arg(max_pos_limit).arg(min_pos_limit));
+
+                m_motor->moveToPosition(min_pos_limit+one_motor_rotate);
+                break;
+
+            }else{
+                //ui->label_limitbtn->setText("Motor is In Save Area");
+                *enc_pos-=one_motor_rotate;
+                ui->spinBox->setValue(*enc_pos);
+
+                m_motor->moveToPosition(*enc_pos);}}}
+
+}
+
+void MainWindow::on_btn_train_clicked()
+{ 
+    person_name=ui->line_person_name->text();
+    svm_trainer_timer->start();
+}
+
+void MainWindow::on_btn_AIassistant_clicked()
+{
+    if(!AIassistant_timer->isActive()){
+        AIassistant_timer->start();
+        ui->btn_AIassistant->setText("AI is working");
+    }else{
+        AIassistant_timer->stop();
+
+        //release wire
+        m_motor->moveToPosition(min_pos_limit);
+
+        ui->btn_AIassistant->setText("AI is sleeping");}
+
+}
+
+void MainWindow::on_btn_manual_setpos_clicked()
+{
+    long pos = ui->spinBox->value();
+    //    pos = 12800*(10/360)*160*(72/102);
+    m_motor->moveToPosition(pos);
+}
+void MainWindow::on_btn_up_clicked()
+{
+    ui->spinBox->setValue(ui->spinBox->value()+one_motor_rotate);
+
+}
+
+void MainWindow::on_btn_down_clicked()
+{
+    ui->spinBox->setValue(ui->spinBox->value()-one_motor_rotate);
+
+}
+
+void MainWindow::on_btn_calimotor_clicked()
+{
+    motorCalibrate();
+    //rotateToBodyDegree(-100);
+}

@@ -11,6 +11,7 @@ Hardware:
 - GPIO: trigger button for rotation safety
 - USB: EPOS4 BLDC motor controller
 - USB: HiPNUC 6-axis IMU
+- Exoskeleton [(files for Solidworks)](/MonoBearExo_Solidworks.zip)
 
 Software:
 

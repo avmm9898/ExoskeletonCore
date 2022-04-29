@@ -23,4 +23,4 @@ Before building this project, please install "EPOS_Linux_Library" first.
 
 
 
-![demo](C:\Users\goodman-home\Documents\GitHub\ExoskeletonCore\demo.png)
+![demo](\demo.png)
